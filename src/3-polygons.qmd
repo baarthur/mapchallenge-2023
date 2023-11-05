@@ -1,0 +1,299 @@
+---
+title: "Day 3: polygons"
+author: "Arthur Bazolli"
+date: 2023-11-03
+---
+
+Okay so I am really pissed that I lost my previous work. I'll try to reconstruct but this is really frustrating, so let's cut to the chase.
+
+We're gonna plot Brazil's 8 largest metropolitan areas alongside with the country's urban footprint.
+
+```{r}
+#| label: setup
+
+library(sf)
+library(geobr)
+library(tidyverse)
+library(ggspatial)
+```
+
+
+
+
+# Download data
+
+I really love ipeaGIT!
+```{r}
+#| label: download
+
+shp_br <- read_state()
+shp_urban <- read_urban_area()
+shp_metro <- read_metro_area()
+```
+
+
+
+
+# Base map
+
+Brazil and the urban areas. I won't call `theme_void()` on the object now because I'll use the coordinates later!
+```{r}
+#| label: base-map
+
+bra <- shp_br %>% 
+  ggplot() +
+  geom_sf(fill = "#00011f", color = "white") +
+  geom_sf(data = shp_urban, fill = "#cf7f00", color = "#cf7f00") +
+  labs(title = "Brazil: urban footprint")
+
+bra
+```
+
+
+
+
+# Tidying
+
+We'll rank the first 8 and remove the "RM d*" thing
+```{r}
+#| label: tidying
+
+shp_metro <- shp_metro %>% 
+  mutate(name_metro = case_when(
+    str_detect(name_metro, "Distrito Federal") ~ "Distrito Federal",
+    str_detect(name_metro, "RM d[aeo] ") ~ str_remove(name_metro, "RM d[aeo] "),
+    str_detect(name_metro, "RM ") ~ str_remove(name_metro, "RM "),
+    .default = name_metro
+  )) %>% 
+  mutate(rank = case_match(
+    name_metro,
+    "São Paulo" ~ 1,
+    "Rio de Janeiro" ~ 2,
+    "Belo Horizonte" ~ 3,
+    "Distrito Federal" ~ 4,
+    "Porto Alegre" ~ 5,
+    "Recife" ~ 6,
+    "Fortaleza" ~ 7,
+    "Curitiba" ~ 8
+  ))
+```
+
+And now, get the RM info into the urban area column.
+```{r}
+#| label: join-urban-metro
+
+shp_urban <- shp_metro %>% 
+  select(code_muni, name_muni, name_metro, rank) %>% 
+  st_drop_geometry() %>% 
+  right_join(shp_urban) %>% 
+  st_as_sf()
+```
+
+
+
+
+# Insect maps
+
+Now, we'll make insect maps of our region's footprints. There's one problem, tho: they'd be completely off scale! Look at this example, where we use `ggspatial`'s `annotation_scale()`:
+```{r}
+#| label: oopsie
+
+shp_urban %>%
+  filter(name_metro == "Belo Horizonte") %>%
+  ggplot() +
+  geom_sf(fill = "grey85", color = "grey85") +
+  labs(title = "Belo Horizonte") +
+  annotation_scale() +
+  theme_void()
+
+shp_urban %>%
+  filter(name_metro == "Fortaleza") %>%
+  ggplot() +
+  geom_sf(fill = "grey85", color = "grey85") +
+  labs(title = "Fortaleza") +
+  annotation_scale() +
+  theme_void()
+```
+
+
+
+## Get a bounding box
+
+To make our insect plots in the same scale, we'll use `coord_sf()` to crop our map to a bounding box. So first, we need to define a reference bounding box common for everyone! I'll set it as the area corresponding to the largest metropolitan area, which according to me is São Paulo. So this is how this will work:
+
+1. Get a reference bounding box for SP. I'll be using the urban footprint, not the full RM, because this will already be big enough.
+2. Get the footprint's centroid
+3. Calculate its distance to one of the bbox's corners. That is, half the diagonal. I'll use the lower left corner, which is given by `bbox_ref[1]` (xmin) and `bbox_ref[2]` (ymin). 
+  + To do so, we need to create a point from this corner using `st_point(x,y)`.
+  + Then, convert it to a simple feature collection with `st_sfc()`. 
+  + This is important because it's the only way we can set a CRS and then calculate the distance!
+```{r}
+#| label: ref
+
+bbox_ref <- shp_urban %>% 
+  filter(name_metro == "São Paulo") %>% 
+  st_bbox()
+
+centroid_ref <- shp_urban %>% 
+  filter(name_metro == "São Paulo") %>% 
+  st_union() %>% 
+  st_centroid()
+
+ray_ref <- st_point(c(bbox_ref[1], bbox_ref[2])) %>% 
+  st_sfc() %>% 
+  st_set_crs(4674) %>% 
+  st_distance(centroid_ref)
+```
+
+Let's see in practice what we've made:
+```{r}
+bbox <- st_buffer(centroid_ref, ray_ref) %>% st_bbox()
+
+shp_urban %>%
+  filter(name_metro == "São Paulo") %>%
+  ggplot() +
+  geom_sf(fill = "grey85", color = "grey85") +
+  labs(title = "São Paulo") +
+  geom_sf(data = centroid_ref) +
+  geom_sf(data = st_buffer(centroid_ref, ray_ref), fill = NA, color = "red") +
+  coord_sf(xlim = c(bbox[1], bbox[3]), ylim = c(bbox[2], bbox[4])) +
+  annotation_scale() +
+  theme_void()
+```
+Tbh, this ray lefts a tiny bit of SP's metro area out, but I tried using `[3]` and `[4]` (i.e. xmax and ymax) to calculate `ray_reference` but the map got absurdely zoomed out and less useful. Also, a caveat: `st_buffer()` does make this weird circle when it's too big, or when you soom in very close in smaller buffers. 
+
+
+
+## Automate it
+
+Alright, so we're goot to go... Except that we don't wanna make 8 of this by hand, right? We can use the powerful combination `function()` + `map()`. Once you start with these two, you don't wanna stop!
+
+First, we'll create a funtion that calculates the centroid, ray, and bbox for each city and then creates the plot.
+
+Next, we'll use `map()` to apply it for each city. Why `map()` instead of a goddamn `for` loop or `apply()`? Two reasons: the first is that `for` loops are wasteful, they take a lot of time! The second is that I learnt R directly inside the [tidyverse](https://www.tidyverse.org/), so I simply have never used many `base` functions as `apply()` and instead opt for their `tidy` counterpart. 
+
+
+### Function
+
+I'll not cover how to create a function here, but it's quite simple. first you list the ingredients inside the brackets, then the recipe inside the curly braces. Piece of cake!
+```{r}
+#| label: fun
+
+gg_metropolis <- function(shp, metro, ray_ref) {
+  
+  centroid <- shp %>% 
+      filter(name_metro == metro) %>% st_union() %>% st_centroid()
+  
+  bbox <- st_buffer(centroid, ray_ref) %>% st_bbox()
+
+  shp %>%
+    filter(name_metro == metro) %>%
+    ggplot() +
+    geom_sf(fill = "grey85", color = "grey85") +
+    coord_sf(xlim = c(bbox[1], bbox[3]), ylim = c(bbox[2], bbox[4])) +
+    labs(title = metro) +
+    theme_void() +
+    theme(
+      title = element_text(family = "Atkinson", size = 7)
+    )
+}
+```
+
+Let's check if its working:
+```{r}
+#| label: fun-test
+
+gg_metropolis(shp_urban, "Belo Horizonte", ray_ref) + annotation_scale()
+
+gg_metropolis(shp_urban, "Fortaleza", ray_ref) + annotation_scale()
+```
+Yaaay! it works and they have the same scale.
+
+
+### Map it!
+
+Alright, now let's create our map. Again, you don't need a nobel to know how to use this. It's geniously simple: you give it a list of things---in our case, each regions' names---and it applies the function for each unit of that thing and saves it on a list. I like the structure where we pass it into an anonymous function, `\(x) f(x)`. It may look too fancy, but this is good down the road when your `map()` has a lot of arguments. That way, anything you pass inside `\(.)` is how your item will be called inside the `map()`, so you can insert other arguments as well.
+
+
+```{r}
+#| label: map
+
+# list of regions
+top_8 <- c("São Paulo", "Rio de Janeiro", "Belo Horizonte", "Distrito Federal", 
+           "Porto Alegre", "Recife", "Fortaleza", "Curitiba")
+
+# map it!
+miniplots <- top_8 %>% 
+  map(
+    \(metro)
+    gg_metropolis(shp_urban, metro, ray_ref)
+  ) 
+```
+
+
+
+# Getting it all together
+Okay, so now we ornate our base map with the insect maps around it. We do this by calling `annotation_custom()` on top of our original plot and I'm fairly new to this, all I know is that you use as arguments the `grob` (I find this wors so disgusting!), which is our minimap, and its position on the plot... this is the coordinates! So I'll hack this by looking "by eye" where do the miniplots look good.
+```{r}
+#| label: brazil-grid
+
+bra
+```
+
+Okay, so now as fair as I know, automation can't save me---at least not that I know! So buckle up, the next chunk will be HUGE. But mostly because I hate clumsy stuff, so I break my code a lot.
+
+We'll do two colums: on the left the first 4 metro areas will be constrained between [85ºW,75ºW] in the x-axis and each block will vary in the y-axis by 10 degrees, starting from [5ºS, 5ºN].
+
+```{r}
+p_day3 <- bra +
+annotation_custom(
+grob = ggplotGrob(miniplots[[1]]),
+xmin = -87, xmax = -77,
+ymin = -5, ymax = 5
+) +
+annotation_custom(
+grob = ggplotGrob(miniplots[[2]]),
+xmin = -87, xmax = -77,
+ymin = -15, ymax = -5
+) +
+annotation_custom(
+grob = ggplotGrob(miniplots[[3]]),
+xmin = -87, xmax = -77,
+ymin = -25, ymax = -15
+) +
+annotation_custom(
+grob = ggplotGrob(miniplots[[4]]),
+xmin = -87, xmax = -77,
+ymin = -35, ymax = -25
+) +
+annotation_custom(
+grob = ggplotGrob(miniplots[[5]]),
+xmin = -32, xmax = -22,
+ymin = -5, ymax = 5
+) +
+annotation_custom(
+grob = ggplotGrob(miniplots[[6]]),
+xmin = -32, xmax = -22,
+ymin = -15, ymax = -5
+) +
+annotation_custom(
+grob = ggplotGrob(miniplots[[7]]),
+xmin = -32, xmax = -22,
+ymin = -25, ymax = -15
+) +
+annotation_custom(
+grob = ggplotGrob(miniplots[[8]]),
+xmin = -32, xmax = -22,
+ymin = -35, ymax = -25
+) +
+  labs(subtitle = "And largest metropolitan areas, to scale", caption = "Source: IBGE via {geobr}") +
+  theme_void() +
+  theme(
+    text = element_text(family = "Atkinson"),
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+ggsave(here::here("output/p-day3.png"), plot = p_day3, width = 7, height = 5)
+```
+

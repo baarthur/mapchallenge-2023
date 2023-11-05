@@ -1,0 +1,36 @@
+# Basic .gitattributes for a R repo.
+
+# Source files
+# ============
+*.Rdata binary
+*.RData binary
+*.rda   binary
+*.rdb   binary
+*.rds   binary
+*.Rd    text
+*.Rdx   binary
+*.Rmd	  text
+*.qmd   text
+*.R  	  text
+*.Rproj text
+*.[Rr]md   linguist-detectable
+*.qmd      linguist-detectable
+
+# Linguist detectability
+# ============
+*.html linguist-detectable=false
+*.lua linguist-detectable=false
+*.json linguist-detectable=false
+*.bib linguist-detectable=false
+*.csl linguist-detectable=false
+*.tex linguist-detectable=false
+*.css linguist-detectable=false
+*.scss linguist-detectable=false
+*.js linguist-detectable=false
+
+
+*.Rmd linguist-language=R
+*.rmd linguist-language=R
+*.qmd linguist-language=R
+*.nb.html linguist-vendored
+slides/libs/* linguist-vendored
