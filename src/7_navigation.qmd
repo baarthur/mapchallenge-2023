@@ -1,0 +1,147 @@
+---
+title: "7 - A navigation map"
+author: "Arthur Bazolli"
+date: 2023-11-07
+format: html
+---
+
+subways :p
+
+# Setup
+
+## Packages
+```{r}
+#| label: setup
+
+library(sf)
+library(here)
+library(geobr)
+library(tidyverse)
+library(gganimate)
+```
+
+## Base files
+
+Local level
+```{r}
+#| label: load-sao
+
+shp_rmsp <- read_metro_area() %>% 
+  filter(name_metro == "RM São Paulo")
+
+shp_urban <- read_urban_area() %>% 
+  filter(code_muni %in% shp_rmsp$code_muni)
+```
+
+Transit network
+```{r}
+#| label: load-metro
+
+shp_network <- readRDS(here("data/shp_sao_network.RDS"))
+
+shp_network <- shp_network 
+
+palette_metro <- readRDS(here("data/metro_palette.RDS"))
+```
+
+
+
+
+# Map it!
+
+## Metropolitan region and urban footprint
+
+Easy peasy...
+```{r}
+#| label: map-rmsp
+
+map_sao_rm <- ggplot() +
+  geom_sf(
+    data = shp_urban,
+    color = NA,
+    fill = "grey90"
+  ) +
+  geom_sf(
+    data = shp_rmsp,
+    color = "grey75",
+    fill = NA
+  )
+```
+
+
+## Rapid transit
+
+First, I filter the existing lines by their opening date, followed by the stations. To add a white dot with a stroke in the line's color, the stations are duplicated: one layer with `size = 0.25`, the first of them, and then another with `size = 0.125` ---the last one before the bounding box--- creates a smaller circle inside the first one, giving the impression of a white dot with a stroke.
+
+I decided to plot under construction or planned lines without stations to pollute less. They're differentiated via the linetype manual scale.
+```{r}
+#| label: map-msp
+
+map_sao_metro <- map_sao_rm + 
+  geom_sf(
+    data = shp_network %>% filter(!is.na(nome_est) & year(inaugura) <= 2023),
+    aes(color = factor(numero_linha)),
+    size = 0.25
+  ) +
+  geom_sf(
+    data = shp_network %>% filter(is.na(nome_est) & year(inaugura) <= 2023),
+    aes(color = factor(numero_linha), linetype = "Running"),
+    linewidth = 0.25
+  ) +
+  geom_sf(
+    data = shp_network %>% filter(is.na(nome_est) & year(inaugura) > 2023),
+    aes(color = factor(numero_linha), linetype = "U/C or planned"),
+    linewidth = 0.25
+  ) +
+  geom_sf(
+    data = shp_network %>% filter(!is.na(nome_est) & year(inaugura) <= 2023),
+    color = "white",
+    size = 0.125
+  ) +
+  coord_sf(xlim = c(-47.0,-46.195), ylim = c(-23.775, -23.195)) +
+  scale_color_manual(
+    values = palette_metro,
+    name = "Line"
+  ) +
+  guides(color = guide_legend(ncol = 2)) +
+  scale_linetype_manual(
+    name = "Status",
+    values = c("Running" = "solid", "U/C or planned" = "dotdash")
+  )
+
+```
+
+## Animate it!
+
+Finally, we our trick to animate, as mentioned in the blogpost.
+
+In the `animate()` function, the duration is in seconds and the resolution in dpi.
+```{r}
+#| label: animate
+
+anim_msp <- map_sao_metro +
+  labs(
+    title = "all i want for christmas is metrô",
+    subtitle = "são paulo rapid transit network in {format(frame_time, '%Y')}"
+  ) + 
+  spatialops::theme_abnq_map(base_family = "Atkinson Hyperlegible") +
+  #theme_void() + 
+  theme(plot.title = element_text(face = "bold")) +
+  transition_time(inaugura) +
+  shadow_mark()
+
+vid_msp <- animate(
+  anim_msp, 
+  renderer = av_renderer("msp.mp4"),
+  duration = 30,
+  fps = 10,
+  end_pause = 90,
+  width = 10,
+  height = 7,
+  units = "in",
+  res = 150
+)
+
+anim_save(path = here("output/"), vid_msp)
+```
+

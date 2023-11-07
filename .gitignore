@@ -43,6 +43,9 @@ vignettes/*.pdf
 desktop.ini
 .DS_Store
 
+# All data sources
+data/
+
 # Spatial data
 *.shp
 *.shx
