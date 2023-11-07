@@ -61,5 +61,4 @@ data/
 *.dta
 *.docx
 *.RDS
-*.mp4
 /.quarto/
