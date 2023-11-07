@@ -1,0 +1,140 @@
+---
+title: "6_asia"
+author: "Arthur Bazolli"
+date: 2023-11-06
+format: html
+---
+
+Setup
+```{r}
+#| label: setup
+
+library(sf)
+library(tmap)
+library(tidyverse)
+library(basedosdados)
+library(rnaturalearth)
+
+set_billing_id(Sys.getenv("bq_billing_id"))
+bigrquery::bq_auth(Sys.getenv("bq_email"))
+```
+
+
+# Get data
+
+## Shapefiles
+```{r}
+shp_world <- ne_countries(scale = "large", type = "countries", returnclass = "sf")
+
+shp_world <- shp_world %>% 
+  select(admin, adm0_a3, name, continent)
+
+shp_asia <- shp_world %>% 
+  filter(continent == "Asia")
+
+dic <- read_csv2(here::here("data/PAIS.csv")) %>% 
+  mutate(id_pais = CO_PAIS, adm0_a3 = CO_PAIS_ISOA3, .keep = "none")
+```
+
+## Trade
+```{r}
+variables <- "ano, mes, id_pais, valor_fob_dolar"
+source_exp <- "`basedosdados.br_me_comex_stat.ncm_exportacao`"
+source_imp <- "`basedosdados.br_me_comex_stat.ncm_importacao`"
+clause_1 <- "ano IN (1997, 2022)"
+
+df_exp <- read_sql(paste0("SELECT ", variables, " FROM ", source_exp, " WHERE ", clause_1))
+df_imp <- read_sql(paste0("SELECT ", variables, " FROM ", source_imp, " WHERE ", clause_1))
+```
+
+Tidy
+```{r}
+#| label: tidying
+
+df_exp <- df_exp %>%
+  group_by(ano, id_pais) %>%
+  summarise(usd_fob = sum(valor_fob_dolar)) %>%
+  left_join(dic) %>%
+  filter(adm0_a3 %in% shp_asia$adm0_a3)
+
+df_imp <- df_imp %>%
+  group_by(ano, id_pais) %>%
+  summarise(usd_fob = sum(valor_fob_dolar)) %>%
+  left_join(dic) %>%
+  filter(adm0_a3 %in% shp_asia$adm0_a3)
+```
+
+Join
+
+
+
+Keep at 2017 prices. Source: https://fred.stlouisfed.org/series/GDPDEF
+```{r}
+def_97 <- 0.69162
+def_22 <- 1.17671
+
+df_exp <- df_exp %>% 
+  mutate(usd_fob_adj = case_when(ano == 1997 ~ usd_fob/def_97, ano == 2022 ~ usd_fob/def_22),
+         type = "Exports") %>%
+  mutate(usd_fob = as.double(usd_fob)) %>% 
+  left_join(shp_asia) %>% 
+  st_as_sf()
+
+df_imp <- df_imp %>% 
+  mutate(usd_fob_adj = case_when(ano == 1997 ~ usd_fob/def_97, ano == 2022 ~ usd_fob/def_22),
+         type = "Imports") %>% 
+  left_join(shp_asia) %>% 
+  st_as_sf()
+
+df <- df_exp %>% 
+  bind_rows(df_imp)
+```
+
+
+Beware of outliers!
+```{r}
+df %>%
+  select(usd_fob_adj, usd_fob) %>% 
+  summary()
+
+brks <- quantile(df$usd_fob_adj, probs = seq(0, 1, 0.15)) %>% as.vector()
+brks[1] <- 0
+brks[8] <- max(df$usd_fob_adj)
+
+df <- df %>% 
+  mutate(fob = cut(usd_fob_adj/1000000, breaks = brks/1000000))
+```
+
+
+
+
+
+```{r}
+bbox <- shp_asia %>% st_bbox()
+
+p_day6 <- shp_world %>% 
+  filter(continent %in% c("Asia", "Europe", "Africa", "Oceania")) %>% 
+  ggplot() +
+  geom_sf(fill = "lightgray", color = "white") +
+  geom_sf(data = df, aes(fill = fob), color = "white") +
+  #scale_fill_distiller(palette = "YlGnBu", na.value = "lightgray") +
+  scale_fill_brewer(
+    palette = "YlGnBu", na.value = "lightgray",
+    labels = c("< 0.588", "< 12.6", "< 58", "< 279", "< 827", "< 2 770", "< 76 000")
+  ) +
+  coord_sf(xlim = c(bbox[1], bbox[3]), ylim = c(bbox[2], bbox[4])) +
+  labs(
+    title = "Brazil & Asia: trade BFFs!",
+    subtitle = "China is king, but Turkiye, Iran, and India are the surprise of the season",
+    fill = "FOB, mill.\nUS$ of 2017",
+    caption = "Source: Siscomex via {basedosdados}"
+  ) +
+  facet_wrap(vars(ano, type)) + 
+  theme_abnq_map(base_family = "Atkinson") +
+  theme(
+    plot.title = element_text(face = "bold")
+  )
+
+ggsave(here::here("output/p-day6.png"), plot = p_day6, width = 7, height = 5)
+```
+
