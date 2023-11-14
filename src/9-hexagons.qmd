@@ -1,0 +1,188 @@
+---
+title: "Day 9: hexagons"
+author: "Arthur Bazolli"
+date: 2023-11-09
+format: html
+---
+
+
+```{r}
+#| label: setup
+
+# Pacotes gerais
+library(tidyverse)
+library(here)
+
+# Pacotes geoestatísticos
+library(sp)
+library(sf)
+library(spdep)
+library(tmap)
+library(geobr)
+library(aopdata)
+```
+
+
+```{r}
+#| label: download
+
+shp_bhz <- read_municipality(code_muni = 3106200, simplified = F) 
+
+shp_footprint <- read_urban_area() %>% filter(code_muni == 3106200) 
+
+shp_aop <- read_access(city = "belo horizonte", mode = "public_transport", peak = T, year = 2019, geometry = T)
+```
+
+```{r}
+#| label: tidying
+
+# Selecting variables from AOP dataset
+shp_aop <- shp_aop %>% 
+  select(year, id_hex, 
+         P001:P007, R001, R003, T001:T004, E001, S001,
+         CMATT60, CMAST60, CMAET60) %>% 
+  na.omit()
+
+# Transforming data
+shp_aop <- shp_aop %>% 
+  mutate(
+    CMATT60 = 100*CMATT60/sum(T001), CMAST60 = 100*CMAST60/sum(S001), CMAET60 = 100*CMAET60/sum(E001),
+    R001_log = log(R001)
+  )
+```
+
+
+
+
+
+
+```{r}
+#| label: nb
+
+nb_aop <- poly2nb(shp_aop, queen = T)
+
+W_queen <- nb2listw(nb_aop, style = "W")
+```
+
+
+
+```{r}
+#| label: lisa
+
+lisa <- localmoran(shp_aop$R001_log, W_queen)
+
+lisa_bi <- localmoran_bv(shp_aop$R001_log, shp_aop$CMATT60, W_queen, nsim = 9999)
+
+shp_aop <- shp_aop %>% 
+  cbind(
+    lisa = attr(lisa, "quadr")[,1], lisa_p = lisa[,5],
+    lisa_bi = attr(lisa, "quadr")[,1], lisa_bi_p = lisa_bi[,5]
+  )
+```
+
+
+```{r}
+#| label: map_base
+
+map_base <- ggplot() +
+  geom_sf(
+    data = shp_footprint,
+    fill = "grey90",
+    color = NA
+  ) +
+  geom_sf(
+    data = shp_bhz,
+    fill = NA
+  )
+
+palette <- c("#f694c1", "#FE5D26", "#8aaa79", "#A9DEF9")
+names(palette) <- levels(shp_aop$lisa_bi)
+```
+
+
+lisa map
+```{r}
+#| label: map_lisa
+
+map_base +
+  geom_sf(
+    data = shp_aop %>% filter(lisa_p <= 0.05),
+    aes(fill = lisa, color = lisa)
+  ) +
+  scale_fill_manual(values = palette) +
+  scale_color_manual(values = palette) +
+  labs(
+    title = "Income patterns: segregation and inequality?",
+    subtitle = "Local Moran's I for income\nBelo Horizonte, Brazil, 2019",
+    fill = "LISA Clusters\nsignificant at 5%",
+    color = "LISA Clusters\nsignificant at 5%",
+    caption = "Source: {aopdata} and {geobr}"
+  ) +
+  coord_sf(xlim = c(-44.08, -43.85), ylim = c(-20.05, -19.78)) +
+  theme_void() %+replace%
+  theme(
+    text = element_text(family = "Atkinson Hyperlegible"),
+    plot.title = element_text(face = "bold", size = 14, hjust = 0),
+    plot.background = element_rect(fill = "white", color = NA)
+  )
+
+ggsave(here("output/p-day9_1.png"))
+```
+
+dinâmico:
+
+```{r}
+tmap_mode("view")
+
+tm_shape(shp_bhz) +
+  tm_borders() +
+  tm_shape(shp_aop %>% filter(lisa_p <= 0.05)) +
+  tm_fill(col = "lisa", alpha = 0.60, palette = palette)
+```
+
+bilisa map
+```{r}
+#| label: map_bilisa
+
+map_base +
+  geom_sf(
+    data = shp_aop %>% filter(lisa_bi_p <= 0.05),
+    aes(fill = lisa_bi, color = lisa_bi)
+  ) +
+  scale_fill_manual(values = palette) +
+  scale_color_manual(values = palette) +
+  labs(
+    title = "Income and accessibility: segregation and inequality?",
+    subtitle = "Bivariate Local Moran's I for income and access to jobs\nBelo Horizonte, Brazil, 2019",
+    fill = "BiLISA Clusters\nsignificant at 5%",
+    color = "BiLISA Clusters\nsignificant at 5%",
+    caption = "Source: {aopdata} and {geobr}"
+  ) +
+  coord_sf(xlim = c(-44.08, -43.85), ylim = c(-20.05, -19.78)) +
+  theme_void() %+replace%
+  theme(
+    text = element_text(family = "Atkinson Hyperlegible"),
+    plot.title = element_text(face = "bold", size = 14, hjust = 0),
+    plot.background = element_rect(fill = "white", color = NA)
+  )
+
+ggsave(here("output/p-day9_2.png"))
+```
+
+
+dyn
+
+```{r}
+tm_shape(shp_bhz) +
+  tm_borders() +
+  tm_shape(shp_aop %>% filter(lisa_bi_p <= 0.05)) +
+  tm_fill(col = "lisa_bi", alpha = 0.60, palette = palette)
+```
+
+
+
+
+
+
+
+

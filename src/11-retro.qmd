@@ -1,0 +1,110 @@
+---
+title: "Day 11: Retro"
+format: html
+---
+
+setup
+```{r}
+#| label: setup
+
+library(sf)
+library(here)
+library(geobr)
+library(tidyverse)
+library(spatialops)
+library(rnaturalearth)
+```
+
+shapefiles
+```{r}
+shp_rail <- shp_extract_read(here("data/ferroviario.zip"))
+
+shp_br <- read_state()
+
+shp_latam <- ne_countries(type = "countries", continent = "south america", returnclass = "sf")
+
+shp_latam <- shp_latam %>% 
+  st_transform(crs = st_crs(shp_br))
+```
+
+tidy
+```{r}
+shp_rail <- shp_rail %>% 
+  mutate(
+    status = factor(
+      tip_situac, levels = c("Em Operação", "Em Obra", "Planejada", "Estudo", "Desativada", NA),
+      labels = c("Em Operação", "Em Obra", "Em Estudo", "Em Estudo", "Desativada")
+    )
+  ) %>% 
+  filter(!is.na(status))
+
+bbox <- shp_br %>% 
+  filter(abbrev_state != "ES") %>% 
+  st_bbox()
+```
+
+
+
+fonts
+```{r}
+f_title = "Barclay Outline CG"
+f_text = "KursivschriftLiegend"
+```
+
+
+```{r}
+map_base <- ggplot() +
+  geom_sf(data = shp_latam, fill = "#e7dbc0") +
+  geom_sf(
+    data = shp_br %>% filter(abbrev_state %in% c("MG", "RS", "TO", "PE", "AM")), 
+    fill = "#e0c2a2"
+  ) +
+  geom_sf(
+    data = shp_br %>% filter(abbrev_state %in% c("GO", "RJ", "PR", "MA", "AL", "RN", "AP", "RO")),
+    fill = "#cfc891"
+  ) +
+  geom_sf(
+    data = shp_br %>% filter(abbrev_state %in% c("MS", "DF", "ES", "PI", "PB", "SE", "PA")), 
+    fill = "#d1c2a1"
+  ) +
+  geom_sf(
+    data = shp_br %>% filter(abbrev_state %in% c("SP", "SC", "BA", "CE", "MT", "RR", "AC")), 
+    fill = "#e8d49e"
+  )
+```
+
+
+```{r}
+map_base + 
+  geom_sf(
+    data = shp_rail %>% filter(status != "Desativada"), 
+    aes(linetype = status),
+    color = "red", linewidth = .125
+  ) +
+  coord_sf(xlim = c(bbox[1], bbox[3]), ylim = c(bbox[2], bbox[4])) +
+  scale_linetype_manual(
+    values = c("Em Operação" = "solid", "Em Obra" = "dashed", "Em Estudo" = "dotted"),
+    labels = c("Estradas de Ferro em tráfego", "Estradas de Ferro em obra", 
+               "Estradas de Ferro em projeto"), 
+    name = "Legenda"
+  ) +
+  labs(
+    tag = "",
+    title = "Planta geral das",
+    subtitle = "ESTRADAS DE FERRO DO BRASIL",
+    caption = "Anno: 2023"
+  ) + 
+  theme_void(base_family = f_text) %+replace%
+  theme(
+    plot.tag = element_text(size = 11),
+    plot.title = element_text(size = 11, hjust = 0),
+    plot.subtitle = element_text(size = 16, family = f_title, hjust = 0),
+    plot.caption = element_text(hjust = 0),
+    plot.background = element_rect(fill = "#e7dbc0", color = NA),
+    plot.margin = margin(11,11,11,11),
+    panel.background = element_rect(fill = "#d3ceac")
+  )
+
+ggsave(here("output/p-day12.png"), width = 7, height = 5)
+```
+

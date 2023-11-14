@@ -1,0 +1,41 @@
+---
+title: "Day 13: choropleth"
+author: "Arthur Bazolli"
+date: 2023-11-09
+format: html
+---
+
+```{r}
+#| label: setup
+
+library(tidyverse)
+library(sf)
+library(spatialops)
+```
+
+```{r}
+map_business <- readRDS(here("data/map_sao_g_business_20082018.RDS"))
+map_work <- readRDS(here("data/map_sao_g_work_20082018.RDS"))
+```
+
+```{r}
+map_business +
+  labs(
+    title = "Life and death of firms in São Paulo",
+    subtitle = "Accumulated 5 years growth in the number of firms per district",
+    caption = "Note: Excludes public administration.\nSource:RAIS/MTE (2023) via {basedosdados} and {geobr}"
+  ) +
+  theme_abnq_map(
+    base_family = "Atkinson"
+  )
+
+map_work +
+  labs(
+    subtitle = "Accumulated 5 years growth in the number of firms per district",
+    caption = "Note: Excludes public administration.\nSource:RAIS/MTE (2023) via {basedosdados} and {geobr}"
+  ) +
+  theme_abnq_map(
+    base_family = "Atkinson"
+  )
+```
+
