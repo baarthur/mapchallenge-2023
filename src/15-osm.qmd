@@ -1,0 +1,68 @@
+---
+title: "Day 15: OpenStreetMap"
+format: html
+---
+
+
+```{r}
+#| label: setup
+
+library(geobr)
+library(osmdata)
+library(sf)
+library(tidyverse)
+library(spatialops)
+```
+
+
+```{r}
+shp_ce <- read_state(code_state = "CE")
+shp_fortaleza <- read_municipality(code_muni = 2304400)
+```
+
+
+```{r}
+#| label: osm
+data("fortaleza")
+data("metrofor")
+
+bbox <- st_bbox(shp_fortaleza)
+
+shp_roads <- bbox %>%  
+  get_osm_roads(use = "lines")
+
+shp_roads <- shp_roads %>% 
+  select(osm_id:CEP, highway, maxspeed)
+```
+
+
+```{r}
+#| label: ggp
+shp_roads %>% 
+  ggplot() +
+  geom_sf(data = shp_ce, fill = "white", color = "white") + 
+  geom_sf(linewidth = .125) + 
+  geom_sf(data = metrofor %>% filter(is.na(station)), linewidth = 0.5) +
+  geom_sf(data = metrofor %>% filter(!is.na(station)), size = 1) +
+  coord_sf(xlim = c(bbox[1], bbox[3]), ylim = c(bbox[2], bbox[4])) +
+  labs(
+    title = "Fortaleza",
+    subtitle = "Streets and metro network",
+    caption = "Source: {osmdata} and {geobr}"
+  ) +
+  theme_void(base_family = "Atkinson Hyperlegible") %+replace%
+  theme(
+    panel.background = element_rect(fill = "skyblue", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(face = "bold", hjust = 0, size = 14)
+  ) 
+
+ggsave(here::here("output/p-day15.png"))
+```
+
+
+
+
+
+
+
