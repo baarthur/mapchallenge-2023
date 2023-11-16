@@ -134,10 +134,12 @@ dinâmico:
 ```{r}
 tmap_mode("view")
 
-tm_shape(shp_bhz) +
+tmap_lisa <- tm_shape(shp_bhz) +
   tm_borders() +
   tm_shape(shp_aop %>% filter(lisa_p <= 0.05)) +
   tm_fill(col = "lisa", alpha = 0.60, palette = palette)
+
+saveRDS(tmap_lisa, here("data/tmap_lisa_bhz.RDS"))
 ```
 
 bilisa map
@@ -173,10 +175,12 @@ ggsave(here("output/p-day9_2.png"))
 dyn
 
 ```{r}
-tm_shape(shp_bhz) +
+tmap_lisa_bi <- tm_shape(shp_bhz) +
   tm_borders() +
   tm_shape(shp_aop %>% filter(lisa_bi_p <= 0.05)) +
   tm_fill(col = "lisa_bi", alpha = 0.60, palette = palette)
+
+saveRDS(tmap_lisa_bi, here("data/tmap_lisa_bi_bhz.RDS"))
 ```
 
 

@@ -3,7 +3,9 @@ title: "Day 11: Retro"
 format: html
 ---
 
-setup
+# Setup
+
+Load packages 
 ```{r}
 #| label: setup
 
@@ -15,8 +17,10 @@ library(spatialops)
 library(rnaturalearth)
 ```
 
-shapefiles
+Load shapefiles
 ```{r}
+#| label: load
+
 shp_rail <- shp_extract_read(here("data/ferroviario.zip"))
 
 shp_br <- read_state()
@@ -27,8 +31,14 @@ shp_latam <- shp_latam %>%
   st_transform(crs = st_crs(shp_br))
 ```
 
-tidy
+
+
+# Treat data
+
+Tidying names and creating a meaningful bounding box (thank you Trindade Island!)
 ```{r}
+#| label: tidy
+
 shp_rail <- shp_rail %>% 
   mutate(
     status = factor(
@@ -43,15 +53,20 @@ bbox <- shp_br %>%
   st_bbox()
 ```
 
-
-
-fonts
+Fancy fonts
 ```{r}
+#| label: fonts
+
 f_title = "Barclay Outline CG"
 f_text = "KursivschriftLiegend"
 ```
 
 
+
+
+# Map it!
+
+Basemap: colored states
 ```{r}
 map_base <- ggplot() +
   geom_sf(data = shp_latam, fill = "#e7dbc0") +
@@ -73,6 +88,8 @@ map_base <- ggplot() +
   )
 ```
 
+
+Adding rail
 
 ```{r}
 map_base + 
