@@ -1,0 +1,262 @@
+---
+title: "Day 20 - Outdoors"
+author: "Arthur Bazolli"
+format: html
+---
+
+# Setup 
+
+Packages
+```{r}
+#| label: setup
+
+library(sf)
+library(here)
+library(geobr)
+library(osmdata)
+library(tidyverse)
+
+# sysfonts::font_add(family = "Font Awesome 6 Brands",
+#                    regular = "path-to-font/Font-Awesome-6-Brands-Regular-400.otf")
+# showtext::showtext_auto()
+```
+
+
+Shapefiles
+```{r}
+shp_rio <- read_municipality(3304557, simplified = F)
+
+shp_rio <- read_municipality(3303302, simplified = F) %>% 
+  bind_rows(shp_rio)
+
+shp_metro <- spatialops::shp_extract_read(here("data/metro.zip"))
+
+# bbox: buffer around cristo
+# cristo c(-43.210835, -22.951890)
+bbox <- st_point(c(-43.184209, -22.949576)) %>% st_sfc(crs = 4674) %>% st_buffer(7000) %>% st_bbox()
+bbox_inner <- st_point(c(-43.184209, -22.949576)) %>% st_sfc(crs = 4674) %>% st_buffer(4000) %>% st_bbox()
+
+geom_bbox <- function(bbox) {
+  coord_sf(xlim = c(bbox[1], bbox[3]), ylim = c(bbox[2], bbox[4]))
+}
+```
+
+Base map
+```{r}
+ggplot(shp_rio) + 
+  geom_sf(fill = "white", color = NA) + 
+  #coord_sf(xlim = c(-43.315016, -43.106232), ylim = c(-23.023816, -22.852097)) + 
+  # geom_sf(data = bbox_inner, fill = NA) +
+  geom_bbox(bbox) +
+  theme_void(base_family = "Atkinson Hyperlegible") + 
+  theme(plot.background = element_rect(fill = "#91daee", color = NA))
+```
+
+
+
+# Geocoding: OSM
+
+Checking available features---this is clutter and I'd never leave on a final script, it's here so you see my creative process (and my future self)
+```{r}
+#| eval: false
+available_features()
+
+# available_tags("bycicle"),
+# available_tags("bycicle_road")
+available_tags("cycleway")
+available_tags("footway")
+available_tags("mountain_pass")
+# available_tags("mtb: description")
+# available_tags("mtb: scale")
+available_tags("tourism")
+# available_tags("trail")
+available_tags("trailblazed")
+available_tags("route")
+available_tags("leisure")
+available_tags("natural")
+available_tags("landuse")
+```
+
+
+## Queries
+```{r}
+query_route <- opq(bbox) %>% 
+  add_osm_feature(key = "route", value = c("bycicle", "foot", "hiking", "light_rail", "mtb",
+                                             "railway", "subway", "tracks", "train", "tram")) %>% 
+  osmdata_sf()
+  
+query_natural <- opq(bbox) %>% 
+  add_osm_feature(key = "natural", value = c("beach", "sand", "wood")) %>% 
+  osmdata_sf()
+
+query_leisure <- opq(bbox) %>% 
+  add_osm_feature(key = "leisure", value = c("marina", "nature_reserve", "park")) %>% 
+  osmdata_sf()
+
+query_landuse <- opq(bbox) %>% 
+  add_osm_feature(key = "landuse", value = c("forest")) %>% 
+  osmdata_sf()
+
+query_lake <- opq(bbox) %>% 
+  add_osm_feature(key = "water", value = "lagoon") %>% 
+  osmdata_sf()
+
+query_tourism <- opq(bbox) %>% 
+  add_osm_feature(key = "tourism", value = c("attraction", "museum", "viewpoint")) %>% 
+  osmdata_sf()
+
+query_jockey <- opq(bbox) %>% 
+  add_osm_feature(key = "leisure", value = c("horse_riding", "track", "stadium", "sports_centre")) %>% 
+  osmdata_sf()
+
+query_cablecar <- opq(bbox) %>% 
+  add_osm_feature(key = "aerialway") %>% 
+  osmdata_sf()
+```
+
+
+## Transform query results into sf
+
+```{r}
+# networks
+shp_streets <- spatialops::get_osm_roads(bbox, "lines")
+
+shp_routes <- query_route$osm_lines %>% 
+  select(osm_id, name, railway, tunnel)
+
+shp_cablecar <- query_cablecar$osm_lines %>% 
+  select(osm_id, name, aerialway)
+
+shp_cablecar <- query_cablecar$osm_polygons %>% 
+  select(osm_id, name, aerialway) %>% 
+  bind_rows(shp_cablecar)
+
+
+
+# nature
+shp_beach <- query_natural$osm_polygons %>% 
+  filter(natural == "beach") %>% 
+  select(osm_id, name, natural, surface)
+
+shp_beach <- query_natural$osm_multipolygons %>% 
+  select(osm_id, name, natural, surface) %>% 
+  filter(natural == "beach") %>% 
+  bind_rows(shp_beach)
+
+
+shp_forest <- query_landuse$osm_polygons %>% 
+  select(osm_id, name, landuse)
+
+shp_forest <- query_natural$osm_polygons %>% 
+  select(osm_id, name, natural) %>% 
+  filter(natural == "wood") %>% 
+  bind_rows(shp_forest)
+
+shp_forest <- query_natural$osm_multipolygons %>% 
+  select(osm_id, name, natural) %>% 
+  filter(natural == "wood") %>% 
+  bind_rows(shp_forest)
+
+shp_lake <- query_lake$osm_multipolygons %>% 
+  select(osm_id, name)
+
+
+
+# attractions 
+shp_tourism <- query_tourism$osm_points %>% 
+  select(osm_id, name, int_name, tourism, geometry) %>% 
+  filter(!is.na(name) & !is.na(tourism))
+
+shp_jockey <- query_jockey$osm_polygons %>% 
+  st_filter(query_jockey$osm_polygons %>% filter(sport == "horse_racing"), .predicate = st_intersects) %>% 
+  select(osm_id, name, sport, leisure)
+
+# shp_tourism %>% 
+#   filter(name %in% c("Pão de Açúcar", "Estátua de Carlos Drummond de Andrade", "Cristo Redentor",
+#                      "Praia vermelha", "Museu da República", "Sala do Artista Popular", "Oi Futuro")
+
+# remove queries
+remove(query_jockey, query_lake, query_landuse, query_leisure, query_natural, query_route, query_tourism)
+```
+
+
+
+# Map it!
+
+Just a little test
+```{r}
+ggplot(shp_rio) + 
+  geom_sf(fill = "white", color = NA) + 
+  #geom_sf(data = shp_streets, linewidth = 0.0625, color = "grey60") +
+  geom_sf(
+    data = shp_routes %>% filter(railway == "tram"), 
+    linewidth = 0.125, alpha = 0.5
+  ) +
+  geom_bbox(bbox_inner) +
+  theme_void(base_family = "Atkinson Hyperlegible") + 
+  theme(
+    panel.background = element_rect(fill = "#91daee", color = NA),
+    legend.position = "none"
+  )
+```
+
+Aaand the final version:
+```{r}
+#| label: final map
+#| warning: false
+
+ggplot(shp_rio) + 
+  geom_sf(fill = "white", color = NA) + 
+  geom_sf(data = shp_streets, linewidth = 0.03125, color = "gray60") +
+  geom_sf(data = shp_forest, fill = "#d3f8e2", color = "#d3f8e2") +
+  geom_sf(data = shp_lake, fill = "#91daee", color = "#91daee") +
+  geom_sf(data = shp_beach, aes(fill = "beach", color = "beach"), linewidth = 1) +
+  scale_fill_manual(values = c("beach" = "#f7eccf"), labels = "Beaches", name = element_blank()) +
+  scale_color_manual(values = c("beach" = "#f7eccf"), labels = "Beaches", name = element_blank()) +
+  ggnewscale::new_scale_fill() +
+  ggnewscale::new_scale_color() +
+  geom_sf(data = shp_metro, aes(shape = "subway"), color = "#0f80bf") +
+  geom_sf(data = shp_jockey[1,], fill = "#d3f8e2", color = NA) +
+  geom_sf(data = shp_jockey[-1,], fill = NA, color = "gray60", linewidth = 0.125) +
+  geom_sf(data = shp_tourism, aes(color = tourism), alpha = 0.5) +
+  scale_color_manual(
+    values = c("attraction" = "#e5c669", "museum" = "#6dda6c", "viewpoint" = "#2893b5"),
+    labels = c("Landmarks", "Musems", "Viewpoints"),
+    name = "Touristic attractions"
+  ) + 
+  ggnewscale::new_scale_color() +
+  geom_sf(
+    data = shp_routes %>% filter(str_detect(name, "Corcovado")), 
+    linewidth = 0.25, aes(color = "corcovado")
+  ) +
+  geom_sf(
+    data = shp_cablecar %>% filter(aerialway == "station"), 
+    fill = "#ff992a", color = "#ff992a", linewidth = 0.75
+  ) +
+  geom_sf(
+    data = shp_cablecar %>% filter(aerialway == "cable_car"), 
+    linewidth = 0.125, aes(color = "sugarloaf")
+  ) +
+  scale_color_manual(
+    values = c("corcovado" = "#fe68b9", "sugarloaf" = "#ff992a"),
+    labels = c("Corcovado Rack Railway", "Sugarloaf Cable Car"),
+    name = element_blank()
+  ) + 
+  geom_sf_text(
+    data = shp_tourism %>% filter(name %in% c("Cristo Redentor")),
+    aes(label = name), size = 2.75, nudge_x = 0.009
+  ) +
+  geom_sf_text(
+    data = shp_tourism %>% filter(name %in% c("Pão de Açúcar")),
+    aes(label = name), size = 2.75, nudge_x = -0.008, nudge_y = 0.001
+  ) +
+  scale_shape_manual(values = c("subway" = 18), labels = "Subway Station", name = element_blank()) +
+  geom_bbox(bbox_inner) +
+  labs(title = "Main touristic attractions in Rio de Janeiro") +
+  theme_void(base_family = "Atkinson Hyperlegible") + 
+  theme(
+    panel.background = element_rect(fill = "#91daee", color = NA),
+    #legend.position = "none"
+  )
+```
+

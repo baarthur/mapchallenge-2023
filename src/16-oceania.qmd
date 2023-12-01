@@ -1,0 +1,227 @@
+---
+title: "Day 16: Oceania"
+date: 2023-11-16
+format: html
+---
+
+# Setup
+
+Load packages
+```{r}
+library(tidyverse)
+library(sf)
+library(here)
+library(readxl)
+library(spatialops)
+library(stplanr)
+library(rnaturalearth)
+```
+
+Load flight data
+```{r}
+df <- read_excel(here("data/au_flights.xlsx"), sheet = "tidy")
+
+df <- df %>% 
+  filter(year == 2019, !is.na(flights)) %>% 
+  mutate(load_factor = load_factor/100, pax = as.numeric(pax))
+```
+
+Load shapefiles: polygons from `rnaturalearth` and airports from ESRI.
+```{r}
+shp_au <- ne_states(country = "Australia", returnclass = "sf")
+
+shp_au <- shp_au %>% 
+  select(name, postal, geometry)
+
+shp_airports <- shp_extract_read(here("data/World_Airports.zip"))
+
+shp_airports <- shp_airports %>% 
+  select(iata = iata_code, type, name, city = municipali) %>%
+  filter(iata %in% c(df$origin, df$dest)) %>%
+  bind_cols(st_coordinates(.))
+```
+
+
+
+# Tidy data
+
+This was trial and error, but these breaks are based on quantiles.
+```{r}
+df_routes <- df %>% 
+  group_by(origin, dest) %>% 
+  summarise(across(c(pax:flights, rpk:ask), sum)) %>% 
+  mutate(yield = rpk/ask) %>% 
+  filter(origin %in% shp_airports$iata & dest %in% shp_airports$iata) %>% 
+  mutate(pax_lvl = cut(
+    pax, 
+    breaks = c(0, 175000, 250000, 550000, 1000000, 5000000, 9200000),
+    labels = c("< 175k", "< 250k", "< 550k", "< 1 million", "< 5 million", "< 9.2 million")
+  )) %>% 
+  mutate(yield_lvl = cut(
+    yield, 
+    breaks = c(0, 0.4, 0.5, 0.7, 0.8, 0.85, 1),
+    labels = c("< 40%", "< 50%", "< 70%", "< 80%", "< 85%", "< 100%")
+  ))
+```
+
+Arange
+```{r}
+df_routes1 <- df_routes %>% 
+  od2line(shp_airports) %>% 
+  arrange(pax)
+```
+
+
+# Map it!
+
+Common parameters
+```{r}
+title <- "Busiest air routes in Australia, 2019:"
+subtitle_both <- "Poor yields in the west, high volume in the east, Melborne is the profit queen"
+subtitle_yield <- "Vital links persist despite their low yields"
+subtitle_pax <- "Pairs over 1 million are mostly inside the east coast,\nexcept for links from Perth and Tasmania to SYD, MEL, and ADL"
+caption <- "Source: bitre.gov.au and {rnaturalearth}"
+```
+
+
+# Combined: yields + pax volume
+```{r}
+ggplot() +
+  geom_sf(data = shp_au %>% filter(name != "Macquarie Island")) +
+  geom_sf(data = df_routes1, aes(linewidth = pax, color = yield_lvl), alpha = 0.75) +
+  scale_linewidth(labels = scales::label_comma(big.mark = " "), name = "Passsengers") +
+  scale_color_viridis_d(option = "inferno", direction = 1, name = "Load Factor") +
+  geom_sf(data = shp_airports, color = "red") + 
+  geom_sf_text(data = shp_airports %>% filter(iata %in% c("MEL", "PER", "ADL")), 
+               aes(label = iata), nudge_y = -1, size = 3) +
+  geom_sf_text(data = shp_airports %>% filter(iata %in% c("SYD", "BNE")), 
+               aes(label = iata), nudge_x = 2, size = 3) +
+  labs(title = title, subtitle = subtitle_both, caption = caption) +
+  theme_void(base_family = "Atkinson Hyperlegible") %+replace%
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0, size = 16),
+    plot.margin = margin(5,5,5,5),
+    plot.background = element_rect(fill = "white", color = NA)
+  )
+
+ggsave(here("output/p-day16_1.png"), height = 5)
+
+ggplot() +
+  geom_sf(data = shp_au %>% filter(name != "Macquarie Island")) +
+  geom_sf(data = df_routes1, aes(linewidth = pax, color = yield), alpha = 0.75) +
+  scale_linewidth(labels = scales::label_comma(big.mark = " "), name = "Passsengers") +
+  scale_color_viridis_c(option = "inferno", labels = scales::percent, direction = 1, name = "Load Factor"
+  ) +
+  geom_sf(data = shp_airports, color = "red") + 
+  geom_sf_text(data = shp_airports %>% filter(iata %in% c("MEL", "PER", "ADL")), 
+               aes(label = iata), nudge_y = -1, size = 3) +
+  geom_sf_text(data = shp_airports %>% filter(iata %in% c("SYD", "BNE")), 
+               aes(label = iata), nudge_x = 2, size = 3) +
+  labs(title = title, subtitle = subtitle_both, caption = caption) +
+  theme_void(base_family = "Atkinson Hyperlegible") %+replace%
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0, size = 16),
+    plot.margin = margin(5,5,5,5),
+    plot.background = element_rect(fill = "white", color = NA)
+  )
+
+ggsave(here("output/p-day16_2.png"), height = 5)
+```
+
+
+## Using geom_curve
+
+Prepare data
+```{r}
+df_routes2 <- shp_airports %>% 
+  select(iata, dest_x = X, dest_y = Y) %>% 
+  st_drop_geometry() %>% 
+  right_join(df_routes, by = c("iata" = "dest")) %>% 
+  rename(dest = iata)
+
+df_routes2 <- shp_airports %>% 
+  select(iata, origin_x = X, origin_y = Y) %>% 
+  st_drop_geometry() %>% 
+  right_join(df_routes2, by = c("iata" = "origin")) %>% 
+  rename(origin = iata) %>% 
+  arrange(pax)
+```
+
+
+## Maps
+
+```{r}
+ggplot() +
+  geom_sf(data = shp_au %>% filter(name != "Macquarie Island")) +
+  geom_curve(
+    data = df_routes2, 
+    aes(x = origin_x, y = origin_y, xend = dest_x, yend = dest_y, linewidth = pax, color = yield_lvl), 
+    alpha = 0.75
+  ) +
+  scale_linewidth(labels = scales::label_comma(big.mark = " "), name = "Passsengers") +
+  scale_color_viridis_d(option = "inferno", direction = 1, name = "Load Factor") +
+  geom_sf(data = shp_airports, color = "red") + 
+  geom_sf_text(data = shp_airports %>% filter(iata %in% c("MEL", "PER", "ADL")), 
+               aes(label = iata), nudge_y = -1, size = 3) +
+  geom_sf_text(data = shp_airports %>% filter(iata %in% c("SYD", "BNE")), 
+               aes(label = iata), nudge_x = 2, size = 3) +
+  labs(title = title, subtitle = subtitle_both, caption = caption) +
+  theme_void(base_family = "Atkinson Hyperlegible") %+replace%
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0, size = 16),
+    plot.margin = margin(5,5,5,5),
+    plot.background = element_rect(fill = "white", color = NA)
+  )
+
+ggsave(here("output/p-day16_3.png"), height = 5)
+
+ggplot() +
+  geom_sf(data = shp_au %>% filter(name != "Macquarie Island")) +
+  geom_curve(
+    data = df_routes2, 
+    aes(x = origin_x, y = origin_y, xend = dest_x, yend = dest_y, color = yield), 
+    alpha = 0.75
+  ) +
+  scale_color_viridis_c(
+    option = "inferno", labels = scales::percent, end = 0.95, direction = 1, name = "Load Factor"
+  ) +
+  geom_sf(data = shp_airports, color = "red") + 
+  geom_sf_text(data = shp_airports %>% filter(iata %in% c("MEL", "PER", "ADL")), 
+               aes(label = iata), nudge_y = -1, size = 3) +
+  geom_sf_text(data = shp_airports %>% filter(iata %in% c("SYD", "BNE")), 
+               aes(label = iata), nudge_x = 2, size = 3) +
+  labs(title = title, subtitle = subtitle_yield, caption = caption) +
+  theme_void(base_family = "Atkinson Hyperlegible") %+replace%
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0, size = 16),
+    plot.margin = margin(5,5,5,5),
+    plot.background = element_rect(fill = "white", color = NA)
+  )
+
+ggsave(here("output/p-day16_4.png"), height = 5)
+
+ggplot() +
+  geom_sf(data = shp_au %>% filter(name != "Macquarie Island")) +
+  geom_curve(
+    data = df_routes2, 
+    aes(x = origin_x, y = origin_y, xend = dest_x, yend = dest_y, color = pax_lvl), 
+    alpha = 0.75
+  ) +
+  scale_color_viridis_d(option = "inferno", direction = 1, name = "Passengers") +
+  geom_sf(data = shp_airports, color = "red") + 
+  geom_sf_text(data = shp_airports %>% filter(iata %in% c("MEL", "PER", "ADL")), 
+               aes(label = iata), nudge_y = -1, size = 3) +
+  geom_sf_text(data = shp_airports %>% filter(iata %in% c("SYD", "BNE")), 
+               aes(label = iata), nudge_x = 2, size = 3) +
+  labs(title = title, subtitle = subtitle_pax, caption = caption) +
+  theme_void(base_family = "Atkinson Hyperlegible") %+replace%
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0, size = 16),
+    plot.margin = margin(5,5,5,5),
+    plot.background = element_rect(fill = "white", color = NA)
+  )
+
+ggsave(here("output/p-day16_5.png"), height = 5)
+```
+
+

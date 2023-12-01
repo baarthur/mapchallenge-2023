@@ -3,7 +3,9 @@ title: "Day 15: OpenStreetMap"
 format: html
 ---
 
+# Setup
 
+Packages
 ```{r}
 #| label: setup
 
@@ -14,18 +16,19 @@ library(tidyverse)
 library(spatialops)
 ```
 
-
+Shapefiles---I love you `{geobr}`! Also, rail data using `metrofor` dataset on my package `{spatialops}`
 ```{r}
+data("metrofor")
 shp_ce <- read_state(code_state = "CE")
 shp_fortaleza <- read_municipality(code_muni = 2304400)
 ```
 
 
+# Get OSM data
+
+Getting data from osm using my wrapper in `{spatialops}`.
 ```{r}
 #| label: osm
-data("fortaleza")
-data("metrofor")
-
 bbox <- st_bbox(shp_fortaleza)
 
 shp_roads <- bbox %>%  
@@ -36,6 +39,7 @@ shp_roads <- shp_roads %>%
 ```
 
 
+# Map it!
 ```{r}
 #| label: ggp
 shp_roads %>% 

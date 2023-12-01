@@ -5,19 +5,25 @@ date: 2023-11-09
 format: html
 ---
 
+# Setup
+
+Packages
 ```{r}
 #| label: setup
 
-library(tidyverse)
 library(sf)
+library(here)
+library(tidyverse)
 library(spatialops)
 ```
 
+Basemaps ---sorry you can't reproduce this :(
 ```{r}
 map_business <- readRDS(here("data/map_sao_g_business_20082018.RDS"))
 map_work <- readRDS(here("data/map_sao_g_work_20082018.RDS"))
 ```
 
+A bit of salt
 ```{r}
 map_business +
   labs(
@@ -27,7 +33,10 @@ map_business +
   ) +
   theme_abnq_map(
     base_family = "Atkinson"
-  )
+  ) 
+
+ggsave(here("output/p-day13_1.png"))
+
 
 map_work +
   labs(
@@ -37,5 +46,7 @@ map_work +
   theme_abnq_map(
     base_family = "Atkinson"
   )
+
+ggsave(here("output/p-day13_2.png"))
 ```
 

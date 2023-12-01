@@ -1,0 +1,215 @@
+---
+title: "26 - Minimal"
+author: "Arthur Bazolli"
+date: 2023-11-26
+format: html
+---
+
+# Setup
+
+Load packages
+```{r}
+#| label: setup
+#| message: false
+
+library(sf)
+library(here)
+library(spatialops)
+library(tidyverse)
+```
+
+Load shapefiles
+```{r}
+st_layers(here("data/TMA_2022.kml"))
+
+# shp_transit <- st_read(here("data/TMA_2022.kml"), layer = "BRT_Corredores") # I don't want this
+shp_transit <- st_read(here("data/TMA_2022.kml"), layer = "Metro_Trem_Barca_Corredores") #%>% 
+  # bind_rows(shp_transit)
+shp_transit <- st_read(here("data/TMA_2022.kml"), layer = "VLT_Monotrilho_Corredores") %>% 
+  bind_rows(shp_transit)
+```
+
+Since a lot of variables are all glued in the description column, we'll use my custom function `maphub_to_sf()`, since it works pretty well here too.
+```{r}
+shp_transit <- shp_transit %>% 
+  maphub_to_sf(values = Description, pair_sep = "<br>") %>% 
+  janitor::clean_names() %>% 
+  filter(situacao %in% c("Operacional", "Operacional não TMA")) %>% 
+  select(modo, cidade_n, corredor) %>% 
+  st_zm()
+```
+
+
+Trying - First map
+```{r}
+shp_transit %>% 
+  filter(!(modo %in% c("BRT", "Barca"))) %>% 
+  distinct(cidade_n) %>% 
+  as_vector() %>% 
+  map(
+    \(x)
+    shp_transit %>% 
+      filter(cidade_n == x & !(modo %in% c("BRT", "Barca"))) %>% 
+      st_zm() %>% 
+      ggplot() + 
+      geom_sf() + 
+      labs(title = x) +
+      theme_void()
+  )
+```
+
+
+
+# Automate it!
+
+Getting in scale - recycling day 3's function
+```{r}
+gg_transit_ray <- function(shp, city, ray_ref, modes = "all") {
+  
+  shp <- if("all" %in% modes) shp else {shp %>% filter(modo %in% modes)}
+
+  centroid <- shp %>% 
+      filter(cidade_n == city) %>% st_union() %>% st_centroid()
+  
+  bbox <- st_buffer(centroid, ray_ref) %>% st_bbox()
+
+  shp %>%
+    filter(cidade_n == city) %>%
+    ggplot() +
+    geom_sf(linewidth = 0.125) +
+    coord_sf(xlim = c(bbox[1], bbox[3]), ylim = c(bbox[2], bbox[4])) +
+    labs(title = city) +
+    theme_void(base_family = "Atkinson Hyperlegible", base_size = 7) 
+}
+
+gg_transit <- function(shp, city, city_ref, modes = "all") {
+  shp <- if("all" %in% modes) shp_transit else {shp_transit %>% filter(modo %in% modes)}
+
+bbox <- shp %>% filter(cidade_n == city) %>% st_bbox()
+bbox_ref <- shp %>% filter(cidade_n == city_ref) %>% st_bbox()
+
+x_dist <- bbox_ref[3] - bbox_ref[1]
+y_dist <- bbox_ref[4] - bbox_ref[2]
+
+m <- shp %>%
+  filter(cidade_n == city) %>%
+  ggplot() +
+  geom_sf(linewidth = 0.125)
+
+m <- if(city != city_ref) {
+  m + coord_sf(xlim = c(bbox[1], bbox[3] + x_dist), ylim = c(bbox[2] - y_dist, bbox[4]))
+} else {m}
+
+m +
+  labs(title = city) +
+  theme_void(base_family = "Atkinson Hyperlegible", base_size = 7)
+}
+
+gg_transit(shp_transit, "São Paulo", 10000, modes = "Metrô")
+```
+
+
+
+# Map it!
+
+But first, let's make minimal names
+```{r}
+shp_transit <- shp_transit %>% 
+  # mutate(cidade_n = str_to_lower(cidade_n)) %>% 
+  mutate(cidade_n = case_match(cidade_n, "juazeiro do norte" ~ "juazeiro do n.", .default = cidade_n))
+```
+
+
+## Mini maps
+```{r}
+modes <- c("Metrô", "Monotrilho", "Trem", "VLT")
+
+cities <- shp_transit %>% 
+  filter(modo %in% modes) %>% 
+  group_by(cidade_n) %>% 
+  summarise(geometry = st_union(geometry)) %>% 
+  mutate(length = st_length(geometry)) %>% 
+  arrange(desc(length))
+
+p <- cities %>% pull(cidade_n) %>% 
+  map(
+    \(x)
+    gg_transit_ray(shp_transit, city = x, 25000, modes) #+ 
+    # theme(panel.background = element_rect(fill = NA))
+  )
+```
+
+
+## Big map
+
+```{r}
+ggplot() +
+  geom_sf(data = geobr::read_country(), fill = NA, color = NA) +
+  annotation_custom(
+    grob = ggplotGrob(p[[1]]),
+    xmin = -75, xmax = -65, ymin = -8, ymax  = 2
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[2]]),
+    xmin = -75, xmax = -65, ymin = -10, ymax  = -20
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[3]]),
+    xmin = -75, xmax = -65, ymin = -32, ymax  = -22
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[4]]),
+    xmin = -65, xmax = -55, ymin = -8, ymax  = 2
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[5]]),
+    xmin = -65, xmax = -55, ymin = -20, ymax  = -10
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[6]]),
+    xmin = -65, xmax = -55, ymin = -32, ymax  = -22
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[7]]),
+    xmin = -55, xmax = -45, ymin = -8, ymax  = 2
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[8]]),
+    xmin = -55, xmax = -45, ymin = -20, ymax  = -10
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[9]]),
+    xmin = -55, xmax = -45, ymin = -32, ymax  = -22
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[10]]),
+    xmin = -45, xmax = -35, ymin = -8, ymax  = 2
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[11]]),
+    xmin = -45, xmax = -35, ymin = -20, ymax  = -10
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[12]]),
+    xmin = -45, xmax = -35, ymin = -32, ymax  = -22
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[13]]),
+    xmin = -35, xmax = -25, ymin = -8, ymax  = 2
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[14]]),
+    xmin = -35, xmax = -25, ymin = -20, ymax  = -10
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[15]]),
+    xmin = -35, xmax = -25, ymin = -32, ymax  = -22
+  ) +
+  labs(title = "urban rail in brazil", caption = "source: mobilidados") +
+  theme_void(base_family = "Atkinson Hyperlegible") %+replace%
+  theme(plot.margin = margin(5,5,5,5), plot.background = element_rect(fill = "white", color = NA),
+        plot.title = element_text(hjust = 0.05))
+
+ggsave(here("output/p-day26.png"))
+```
+

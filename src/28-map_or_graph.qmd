@@ -1,0 +1,205 @@
+---
+title: "Day 28: is this a map or a graph?"
+author: "Arthur Bazolli"
+date: 2023-11-28
+---
+
+# Setup 
+
+Load packages
+```{r}
+#| label: setup
+#| message: false
+
+library(sf)
+library(geobr)
+library(sidrar)
+library(ipeadatar)
+
+library(here)
+library(tidyverse)
+```
+
+Get data
+```{r}
+## metropolitan areas
+shp_rm <- read_metro_area()
+
+## municipal gdp
+### first, search series to get the code for municipal gdp
+t <- search_series(terms = c("municipal","Municipal"), fields = "name")
+
+### 2019 is the most recent :(
+df_pib <- ipeadata("PIB_IBGE_5938_37") %>% 
+  filter(year(date) == 2019)
+
+remove(t)
+
+## population
+sidrar::info_sidra(9514)
+df_pop <- get_sidra(9514, variable = 93, classific = "c2", category = list(6794), geo = "City")
+```
+
+## Tidy data
+
+Get same columns in the standard `{geobr}` names, filter only municipalities on `ipeadata` etc.
+```{r}
+df_pib <- df_pib %>% 
+  filter(tcode >= 1000000) %>% 
+  mutate(pib = value, code_muni = tcode, .keep = "none")
+
+df_pop <- df_pop %>% 
+  mutate(pop = Valor, code_muni = as.numeric(`Município (Código)`), .keep = "none")
+
+shp_rm <- shp_rm %>%
+  mutate(area_km = st_area(geom) %>% units::set_units(km^2)) %>% 
+  units::drop_units() %>% 
+  left_join(df_pib) %>% 
+  left_join(df_pop) %>% 
+  mutate(dens_km = pop/area_km)
+
+remove(df_pib)
+remove(df_pop)
+
+shp_top10 <- shp_rm %>% 
+  arrange(desc(pib)) %>% 
+  slice(1:10)
+```
+
+Create a color palette
+```{r}
+palette <- c("#7dcbbb", "#ad68af", "#b0aad1", "#f7695f", "#6ea1c9",
+              "#fba550", "#a5da56", "#fac0df", "#c2e8b9", "#ffec5d")
+names(palette) <- shp_top10 %>% pull(name_muni)
+```
+
+
+
+# Map it!
+
+## Insect city maps
+```{r}
+gg_metropolis <- function(shp, muni, ray_ref, alpha = 1) {
+  
+  centroid <- shp %>% 
+    filter(name_muni == muni) %>% st_union() %>% st_centroid()
+  
+  bbox <- st_buffer(centroid, ray_ref) %>% st_bbox()
+  
+  shp %>%
+    filter(name_muni == muni) %>%
+    ggplot() +
+    geom_sf(aes(fill = name_muni), color = "grey85", alpha = alpha) +
+    coord_sf(xlim = c(bbox[1], bbox[3]), ylim = c(bbox[2], bbox[4])) +
+    scale_fill_manual(values = palette) +
+    #labs(title = muni) +
+    theme_void() +
+    theme(
+      #title = element_text(family = "Atkinson", size = 7)
+      legend.position = "none"
+    )
+}
+
+cities <- shp_top10 %>% 
+  arrange(name_muni) %>%
+  pull(name_muni) %>% 
+  map(
+    \(x) gg_metropolis(shp_top10, x, 115000, 0.5)
+  )
+```
+
+
+## The tricy part
+
+The hard thing here is to plot the city polygon exactly where it is on the dispersion graph. My workaround was to find an ad-hoc bandwidth that produces a reasonable size for the cities, and then generate each city's limits centered on their dispersion points plus (max) or minus (min) the bandwidth.
+```{r}
+x_band <- 3000
+y_band <- 150
+
+shp_top10 <- shp_top10 %>%
+  arrange(name_muni) %>% 
+  mutate(pib_pc = pib/pop) %>% 
+  mutate(
+    xmin = dens_km - x_band, xmax = dens_km + x_band,
+    ymin = pib_pc - y_band, ymax = pib_pc + y_band
+  )
+```
+
+
+## Getting everything together
+
+```{r}
+shp_top10 %>% 
+  ggplot(aes(x = dens_km, y = pib/pop)) +
+  # mao
+  annotation_custom(grob = ggplotGrob(cities[[6]]),
+                    xmin = shp_top10$xmin[6], xmax = shp_top10$xmax[6],
+                    ymin = shp_top10$ymin[6], ymax = shp_top10$ymax[6]) +
+  # bsb
+  annotation_custom(grob = ggplotGrob(cities[[2]]),
+                    xmin = shp_top10$xmin[2], xmax = shp_top10$xmax[2],
+                    ymin = shp_top10$ymin[2], ymax = shp_top10$ymax[2]) +
+  # sao
+  annotation_custom(grob = ggplotGrob(cities[[10]]),
+                    xmin = shp_top10$xmin[10], xmax = shp_top10$xmax[10],
+                    ymin = shp_top10$ymin[10], ymax = shp_top10$ymax[10]) +
+  # rio
+  annotation_custom(grob = ggplotGrob(cities[[8]]),
+                    xmin = shp_top10$xmin[8], xmax = shp_top10$xmax[8],
+                    ymin = shp_top10$ymin[8], ymax = shp_top10$ymax[8]) +
+  # cpn
+  annotation_custom(grob = ggplotGrob(cities[[5]]),
+                    xmin = shp_top10$xmin[5], xmax = shp_top10$xmax[5],
+                    ymin = shp_top10$ymin[5], ymax = shp_top10$ymax[5]) +
+  # poa
+  annotation_custom(grob = ggplotGrob(cities[[9]]),
+                    xmin = shp_top10$xmin[9], xmax = shp_top10$xmax[9],
+                    ymin = shp_top10$ymin[9], ymax = shp_top10$ymax[9]) +
+  # cwb
+  annotation_custom(grob = ggplotGrob(cities[[3]]),
+                    xmin = shp_top10$xmin[3], xmax = shp_top10$xmax[3],
+                    ymin = shp_top10$ymin[3], ymax = shp_top10$ymax[3]) +
+  # bhz
+  annotation_custom(grob = ggplotGrob(cities[[1]]),
+                    xmin = shp_top10$xmin[1], xmax = shp_top10$xmax[1],
+                    ymin = shp_top10$ymin[1], ymax = shp_top10$ymax[1]) +
+  # for
+  annotation_custom(grob = ggplotGrob(cities[[4]]),
+                    xmin = shp_top10$xmin[4], xmax = shp_top10$xmax[4],
+                    ymin = shp_top10$ymin[4], ymax = shp_top10$ymax[4]) +
+  geom_point(aes(color = name_muni)) +
+  # osa
+  annotation_custom(grob = ggplotGrob(cities[[7]]),
+                    xmin = shp_top10$xmin[7], xmax = shp_top10$xmax[7],
+                    ymin = shp_top10$ymin[7], ymax = shp_top10$ymax[7]) +
+  # geom_smooth(method = "lm", se = F, linewidth = 0.5) +
+  scale_color_manual(values = palette, name = "City") +
+  xlim(-1000, NA) +
+  ylim(10, NA) +
+  labs(
+    title = "Are denser cities richer?",
+    subtitle = paste0("A general trend exists for the top 10 municipal GDPs in Brazil.",
+                      "\nbut remember: correlation is not causation!"),
+    x = "Density (inhabitants per sq. km)",
+    y = "GDP per capita (thousands)",
+    caption = paste0(
+      "Note: GDP data from 2019, in constant 2010 BRL. Population data from the 2022 census.",
+      "\nSources: {ipeadatar}, {sidrar}, {geobr}"
+    )
+  ) +
+  theme_classic(base_family = "Atkinson Hyperlegible", base_size = 11) %+replace%
+  theme(
+    plot.title = element_text(face = "bold", size = 14, hjust = 0),
+    plot.caption = element_text(hjust = 0, size = 9, margin = margin(11))
+  )
+
+ggsave(here("output/p-day28.png"))
+```
+
+
+# Just to check the top 10
+```{r}
+df_top10 <- shp_top10 %>% 
+  select(code_muni, name_muni, pib, pop, area_km, dens_km, pib_pc)
+```
+

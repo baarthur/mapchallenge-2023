@@ -63,7 +63,6 @@ f_text = "KursivschriftLiegend"
 
 
 
-
 # Map it!
 
 Basemap: colored states.
@@ -88,9 +87,7 @@ map_base <- ggplot() +
   )
 ```
 
-
 Adding rail
-
 ```{r}
 map_base + 
   geom_sf(

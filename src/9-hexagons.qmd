@@ -5,24 +5,31 @@ date: 2023-11-09
 format: html
 ---
 
+Today we're talking hexagons, so I'm revisiting a project I did for my Spatial Econometrics class on exploratory spatial data analysis (**Esda**). Our goal is to look for spatial patterns in our data, that is: are my values close to my neighbors'? Or are they different? In both cases, is this (dis)similarity random... or does it follows a **spatial pattern**?
 
+Maybe Esda seems a bit old fashioned now, but it was a huge thing in the 90s/2000s. Still, it is a very invaluable tool when, err... exploring our data! Economics has a long history of recognizing the importance of space.
+
+# Setup 
+
+Load packages
 ```{r}
 #| label: setup
+#| warning: false
 
-# Pacotes gerais
-library(tidyverse)
-library(here)
-
-# Pacotes geoestatísticos
+# Geocomputation
 library(sp)
 library(sf)
 library(spdep)
 library(tmap)
 library(geobr)
 library(aopdata)
+
+# General
+library(here)
+library(tidyverse)
 ```
 
-
+Get data---everything is online, so you can easily reproduce yourself. Maybe use a different city? I have chosen my beloved hometown Belo Horizonte, but most major Brazilian cities are included in the project as of 2022. It mostly depends if they have a [GTFS](https://en.wikipedia.org/wiki/GTFS) available or not.
 ```{r}
 #| label: download
 
@@ -33,6 +40,15 @@ shp_footprint <- read_urban_area() %>% filter(code_muni == 3106200)
 shp_aop <- read_access(city = "belo horizonte", mode = "public_transport", peak = T, year = 2019, geometry = T)
 ```
 
+
+
+# Prepare data
+
+## Tidying
+First, since `{aopdata}` offers us a lot of variables, I will start selecting only a few of them. I also omit the `NAs` since they would prevent us to correctly calculate a neighbors distance matrix.
+I'm purposely leaving more variables here than I use just to give you some suggestions of what to do---I used all of them in another work. Check the full list in the `aopdata::read_access` help file.
+
+Next, I transform the cummulative accessibility measures to the relative form, since this makes it easier for us to compare regions.
 ```{r}
 #| label: tidying
 
@@ -52,10 +68,11 @@ shp_aop <- shp_aop %>%
 ```
 
 
+## Neighborhood matrix
 
+Since we are using polygons and not points, we construct our distance matrix using a pattern. The most common is the queen one, which takes only a polygon's direct neighbors. There's also the rook pattern (yes, both come from chess), refer to Prof. Anselin's excellent materials on [GeoDa center](https://geodacenter.github.io/workbook/4a_contig_weights/lab4a.html) for more information.
 
-
-
+With the `spdep` package, we do that in two steps: first, we make a neighbors list from the polygon according to our contiguity criterion with `poly2nb`, which creates an object of class `nb`. Next, we get the distance matrix, an object of class `listw`, with `nb2listw`. We use `style = W` to make a standardized matrix.
 ```{r}
 #| label: nb
 
@@ -65,7 +82,11 @@ W_queen <- nb2listw(nb_aop, style = "W")
 ```
 
 
+## Spatial autocorrelation measures
 
+Here we'll focus on the Local Index of Spatial Autocorrelation (**Lisa**). First, on the univariate case, our goal is to analyze the spatial pattern of income. Four patterns are possible and the interpretation is straightforward: low-low and high-high indicates similarity between neighborhoods, whereas low-high and high-low are the cases when your surroundings are very different from you.
+
+Next, the bivariate scenario compares how income **and** accessibility relate in space, but the interpretation changes. Low-low and high-high indicate homogeneous patterns in a given region, whereas high-low indicates in our case high income and low accessibility (because `R001_log` came first on `localmoran_bv`) and low-high the opposite situation. 
 ```{r}
 #| label: lisa
 
@@ -73,6 +94,7 @@ lisa <- localmoran(shp_aop$R001_log, W_queen)
 
 lisa_bi <- localmoran_bv(shp_aop$R001_log, shp_aop$CMATT60, W_queen, nsim = 9999)
 
+# bind the quadrants and their p-value so we can plot it nicely
 shp_aop <- shp_aop %>% 
   cbind(
     lisa = attr(lisa, "quadr")[,1], lisa_p = lisa[,5],
@@ -81,6 +103,12 @@ shp_aop <- shp_aop %>%
 ```
 
 
+
+# Map it!
+
+## Base map
+
+First, a base map with the region's urban footprint and city limits. I also generated a custom palette using [coolors](https://coolors.co/).
 ```{r}
 #| label: map_base
 
@@ -99,8 +127,9 @@ palette <- c("#f694c1", "#FE5D26", "#8aaa79", "#A9DEF9")
 names(palette) <- levels(shp_aop$lisa_bi)
 ```
 
+# LISA map
 
-lisa map
+First, a stactic map. As usual, I use `coord_sf` to limit our viewing region, since `shp_footprint` covers a very large region than where we actually have data.
 ```{r}
 #| label: map_lisa
 
@@ -129,8 +158,7 @@ map_base +
 ggsave(here("output/p-day9_1.png"))
 ```
 
-dinâmico:
-
+Dynamic map: great for exploring!
 ```{r}
 tmap_mode("view")
 
@@ -142,7 +170,10 @@ tmap_lisa <- tm_shape(shp_bhz) +
 saveRDS(tmap_lisa, here("data/tmap_lisa_bhz.RDS"))
 ```
 
-bilisa map
+
+## BiLISA
+
+Stactic
 ```{r}
 #| label: map_bilisa
 
@@ -171,9 +202,7 @@ map_base +
 ggsave(here("output/p-day9_2.png"))
 ```
 
-
-dyn
-
+Dynamic
 ```{r}
 tmap_lisa_bi <- tm_shape(shp_bhz) +
   tm_borders() +

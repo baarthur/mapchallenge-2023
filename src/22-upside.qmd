@@ -1,0 +1,130 @@
+---
+title: "22 - North is not always up"
+author: "Arthur Bazolli"
+date: 2023-11-22
+format: html
+---
+
+# Setup
+
+Load packages
+```{r}
+#| label: setup
+#| message: false
+
+library(sf)
+library(here)
+library(geobr)
+library(aopdata)
+library(gganimate)
+library(spatialops)
+library(tidyverse)
+```
+
+Load shapefiles
+```{r}
+shp_bhz <- read_municipality(3106200)
+
+shp_footprint <- list.files(here("data/bhz"), "MANCHA_URBANA_", full.names = T) %>% 
+  map(shp_extract_read) %>% 
+  bind_rows()
+
+shp_plan <- shp_extract_read(here("data/bhz/LIMITE_AREA_PLANEJADA_1895.zip"))
+```
+
+
+
+# Get roads from osm
+
+```{r}
+shp_roads <- shp_plan %>% 
+  st_transform(crs = 4326) %>% 
+  st_bbox() %>% 
+  get_osm_roads("lines") 
+
+shp_roads <- shp_roads %>% 
+  select(osm_id, name, highway) %>%
+  st_intersection(st_transform(shp_plan, crs = 4326))
+
+shp_contorno <- shp_roads %>% 
+  filter(str_detect(name, "Contorno"))
+```
+
+
+
+# Flipping upside down
+
+We'll use proj4 here and set `+axis=wsu` to flip north and south: https://shkspr.mobi/blog/2021/07/south-up-equal-earth-projection-in-r/
+```{r}
+crs <- "+proj=longlat +ellps=GRS80 +axis=wsu +no_defs +type=crs"
+```
+
+IT WORKS!!!!
+```{r}
+shp_bhz %>% 
+  st_transform(crs = crs) %>% 
+  ggplot() +
+  geom_sf()
+```
+
+Srsly now, let's set all the CRS' to that thing.
+```{r}
+shp_bhz <- st_transform(shp_bhz, crs = crs)
+shp_footprint <- shp_footprint %>% 
+  arrange(desc(ANO_MANCHA)) %>% 
+  st_transform(crs = crs)
+shp_plan <- st_transform(shp_plan, crs = crs)
+shp_roads <- st_transform(shp_roads, crs = crs)
+```
+
+
+
+# Map it!
+
+```{r}
+m_bh <- ggplot() +
+  geom_sf(data = shp_bhz, fill = NA) +
+  geom_sf(data = shp_footprint, aes(fill = factor(ANO_MANCHA)), color = NA, alpha = 0.25) +
+  scale_fill_viridis_d(option = "D", direction = 1, name = "Urban Footprint") +
+  geom_sf(data = shp_roads, linewidth = 0.025) +
+  geom_sf(data = shp_contorno, linewidth = 0.05) +
+  geom_sf(data = shp_plan, fill = NA, color = "red", linewidth = 0.5) +
+  labs(
+    title = "Error in [Aarão Reis] : subscript out of bounds!",
+    subtitle = "Planned urban area (1985) v. actual urban footprint, Belo Horizonte",
+    caption = "Sources: BHMap and {geobr}"
+  ) +
+  theme_void(base_family = "Atkinson Hyperlegible") %+replace%
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0),
+      plot.caption = element_text(hjust = 0),
+      plot.background = element_rect(fill = "white", color = NA),
+      plot.margin = margin(5,5,5,5)
+    )
+
+m_bh
+
+ggsave(here("output/p-day22_1.png"))
+```
+
+
+## Animate it!
+
+```{r}
+anim_bh <- m_bh +
+  labs(subtitle = "Planned urban area (1985) v. footprint in {round(frame_time, 0)}, Belo Horizonte") +
+  theme(legend.position = "none") +
+  transition_time(time = ANO_MANCHA) +
+  shadow_wake(wake_length = 0.25, alpha = 0.5)
+
+vid_bh <- animate(
+  anim_bh, 
+  renderer = av_renderer("bhz.mp4"),
+  duration = 30, end_pause = 30,
+  fps = 10, res = 300,
+  width = 7, height = 7,  units = "in"
+)
+
+anim_save(path = here("output/"), vid_bh)
+```
+

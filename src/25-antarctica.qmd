@@ -1,0 +1,94 @@
+---
+title: "25 - Antartica"
+author: "Arthur Bazolli"
+date: 2023-11-25
+format: html
+---
+
+# Setup
+
+Load packages
+```{r}
+#| label: setup
+#| message: false
+
+library(sf)
+library(here)
+library(spatialops)
+library(tidyverse)
+library(rnaturalearth)
+```
+
+Load files
+```{r}
+shp_world <- ne_countries(scale = 50, returnclass = "sf") %>% 
+  st_transform(crs = 3031)
+
+shp_time <- shp_extract_read(here("data/timezones.zip")) %>% 
+  st_transform(crs = 3031)
+
+shp_ata <- shp_world %>% 
+  filter(su_a3 == "ATA")
+
+shp_time_ata <- shp_time %>% 
+  st_intersection(shp_ata)
+```
+
+
+
+# Map it!
+
+Base
+```{r}
+shp_ata %>% 
+  ggplot() + 
+  geom_sf() +
+  theme_linedraw()
+```
+
+Final
+```{r}
+bbox <- st_bbox(shp_ata)
+
+ggplot() + 
+  geom_sf(data = shp_world) +
+  geom_sf(data = shp_time_ata, aes(fill = zone), color = NA) +
+  scale_fill_viridis_c(option = "D") +
+  #geom_sf_text(data = shp_time_ata, aes(label = time_zone), check_overlap = T, size = 3) +
+  #scale_fill_brewer(palette = "Set3") +
+  coord_sf(xlim = c(bbox[1], bbox[3]), ylim = c(bbox[2], bbox[4])) +
+  labs(
+    title = "Timezones in Antarctica", 
+    caption = "Sources: {rnaturalearth} and DIVA-GIS",
+    fill = "Timezone (GMT),\nLondon = 0"
+  ) +
+  theme_void(base_family = "Atkinson Hyperlegible") %+replace% 
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0, size = 14), 
+    plot.caption = element_text(hjust = 0),
+    plot.margin = margin(10,0,10,0)
+  )
+```
+
+
+Let's have a little bit of fun: what if we project the whole world using the Antarctic Polar Stereographic?
+```{r}
+ggplot() + 
+  geom_sf(data = shp_world) +
+  geom_sf(data = shp_time_ata, aes(fill = zone), color = NA) +
+  scale_fill_viridis_c(option = "D") +
+  #geom_sf_text(data = shp_time_ata, aes(label = time_zone), check_overlap = T, size = 3) +
+  #scale_fill_brewer(palette = "Set3") +
+  #coord_sf(xlim = c(bbox[1], bbox[3]), ylim = c(bbox[2], bbox[4])) +
+  labs(
+    title = "Timezones in Antarctica", 
+    caption = "Sources: NaturalEarth and DIVA-GIS",
+    fill = "Timezone (GMT),\nLondon = 0"
+  ) +
+  theme_void(base_family = "Atkinson Hyperlegible") %+replace% 
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0), 
+    plot.caption = element_text(hjust = 0)
+  )
+```
+

@@ -1,0 +1,196 @@
+---
+title: "21 - raster"
+author: "Arthur Bazolli"
+date: 2023-11-21
+format: html
+---
+
+# Setup
+
+Load packages
+```{r}
+#| label: setup
+#| message: false
+
+library(sf)
+library(here)
+library(stars)
+library(gstat)
+library(raster)
+library(tidyverse)
+library(gganimate)
+```
+
+Load files
+```{r}
+shp_rmbh <- geobr::read_metro_area() %>% 
+  filter(name_metro == "RM Belo Horizonte" & !(str_detect(subdivision, "Colar")))
+
+df <- read_csv2(here("data/meteo_nov.csv"))
+
+shp_meteo <- df %>% 
+  distinct(municipio, codEstacao, uf, nomeEstacao, latitude, longitude) %>% 
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326) %>% 
+  st_transform(crs = st_crs(shp_rmbh)) %>% 
+  st_filter(shp_rmbh, .predicate = st_intersects)
+```
+
+
+## Spatial grid
+```{r}
+shp_grid <- shp_rmbh %>% 
+  st_union() %>% 
+  st_make_grid(cellsize = c(0.025, 0.025), square = F) %>% 
+  st_intersection(shp_rmbh)
+
+grid <- shp_grid %>% 
+  st_as_stars() %>%
+  st_crop(shp_rmbh)
+```
+
+
+
+# ESDA
+
+First map
+```{r}
+shp_rmbh %>% 
+  ggplot() +
+  geom_sf(fill = NA) +
+  geom_sf(data = shp_grid, fill = NA) +
+  geom_sf(data = shp_meteo, color = "red", size = 0.5) +
+  theme_void()
+```
+
+Daily volume
+```{r}
+#| label: eda-volume
+
+df %>% 
+  filter(codEstacao %in% shp_meteo$codEstacao) %>% 
+  group_by(dia = day(datahora), municipio) %>% 
+  summarise(pluvio = sum(valorMedida)) %>% 
+  ggplot() +
+  geom_line(aes(x = dia, y = pluvio, group = municipio, color = municipio))
+
+df %>% 
+  filter(codEstacao %in% shp_meteo$codEstacao) %>% 
+  filter(day(datahora) > 13) %>% 
+  group_by(dia = day(datahora), municipio) %>% 
+  summarise(pluvio = sum(valorMedida)) %>% 
+  ggplot() +
+  geom_line(aes(x = dia, y = pluvio, group = municipio, color = municipio))
+```
+
+That said, we'll use days 14 to 20.
+
+
+
+# Kriging
+
+Prepare data
+```{r}
+#| label: data-days
+
+df_2 <- df %>% 
+  filter(codEstacao %in% shp_meteo$codEstacao) %>% 
+  filter(day(datahora) > 13) %>% 
+  group_by(municipio, codEstacao, nomeEstacao, dia = day(datahora)) %>% 
+  summarise(pluvio = sum(valorMedida))
+
+days <- c(14:20)
+```
+
+Variogram
+```{r}
+#| label: variogram
+vgm <- days %>% 
+  map(
+    \(x)
+    df_2 %>% filter(dia == x) %>% left_join(shp_meteo) %>% st_as_sf() %>% 
+      variogram(pluvio ~ 1, .)
+  )
+
+vgm <- set_names(vgm, days)
+```
+
+Fit
+```{r}
+#| label: fit
+
+fit.variogram(vgm_chuva %>% filter(dist >= 2), model=vgm("Sph"))
+
+vgm_fit <- days %>% 
+  map(
+    \(x)
+    pluck(vgm, as.character(x)) %>% 
+      fit.variogram(model = vgm("Sph"))
+  )
+
+vgm_fit <- set_names(vgm_fit, days)
+```
+
+Kriging
+```{r}
+#| label: kriging
+
+krige_days <- function(day, df, shp_points, grid, ...) {
+  df_n <- df %>% filter(dia == day) %>% left_join(shp_points) %>% st_as_sf()
+  vgm <- pluck(vgm_fit, as.character(day))
+  krige(formula = df_n$pluvio ~ 1, df_n, newdata = grid, model = vgm)
+}
+
+krige <- days %>% 
+  map(
+    \(x)
+    krige_days(x, df_2, shp_meteo, grid) %>% 
+      mutate(dia = x)
+  ) 
+
+krige <- setNames(krige, days)
+```
+
+Krige to sf
+```{r}
+#| label: krige-sf
+
+krige_sf <- days %>% 
+  map(
+    \(x)
+    pluck(krige, as.character(x)) %>% 
+      st_as_sf()
+  ) %>% 
+  bind_rows()
+```
+
+
+
+# Map it!
+```{r}
+#| label: ggp
+#| warning: false
+
+m_base <- ggplot() +
+  geom_sf(data = shp_rmbh, fill = NA) +
+  labs(
+    title = "Where is the rain?",
+    fill = "Rain (mm)"
+  ) +
+  theme_void(base_family = "Atkinson Hyperlegible")
+ 
+
+m_rain <- days %>% 
+  map(
+    \(x)
+    m_base +
+      geom_stars(
+        data = pluck(krige, as.character(x)), 
+        aes(fill = var1.pred, x = x, y = y), alpha = 0.75
+      ) +
+      scale_fill_viridis_c(option = "viridis", na.value = NA) +
+      labs(subtitle = paste0("It's raining season in Belo Horizonte again, but not everywhere.",
+      "\n", "Data for ", x, " October 2023"))
+  )
+```
+
+
