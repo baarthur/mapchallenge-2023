@@ -30,3 +30,5 @@ ggplot() +
     caption = "Source: {geobr}"
   ) +
   theme_void(base_family = "Atkinson Hyperlegible")
+
+ggsave(here::here("output/p-day19.png"))

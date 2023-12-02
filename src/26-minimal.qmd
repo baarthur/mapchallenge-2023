@@ -35,7 +35,7 @@ shp_transit <- shp_transit %>%
   maphub_to_sf(values = Description, pair_sep = "<br>") %>% 
   janitor::clean_names() %>% 
   filter(situacao %in% c("Operacional", "Operacional não TMA")) %>% 
-  select(modo, cidade_n, corredor) %>% 
+  select(modo, cidade_n, corredor, situacao) %>% 
   st_zm()
 ```
 
@@ -105,6 +105,7 @@ m +
   theme_void(base_family = "Atkinson Hyperlegible", base_size = 7)
 }
 
+# testing
 gg_transit(shp_transit, "São Paulo", 10000, modes = "Metrô")
 ```
 
@@ -210,6 +211,79 @@ ggplot() +
   theme(plot.margin = margin(5,5,5,5), plot.background = element_rect(fill = "white", color = NA),
         plot.title = element_text(hjust = 0.05))
 
-ggsave(here("output/p-day26.png"))
+ggsave(here("output/p-day26_1.png"))
+```
+
+
+## Filtering only mass transit
+
+Here we remove "Operacional não TMA". This basically ignores infrequent service lines, while leaving some trams that run frequently.
+```{r}
+cities <- shp_transit %>% 
+  filter(modo %in% modes & situacao == "Operacional") %>% 
+  group_by(cidade_n) %>% 
+  summarise(geometry = st_union(geometry)) %>% 
+  mutate(length = st_length(geometry)) %>% 
+  arrange(desc(length))
+
+p <- cities %>% pull(cidade_n) %>% 
+  map(
+    \(x)
+    gg_transit_ray(shp_transit, city = x, 25000, modes) #+ 
+    # theme(panel.background = element_rect(fill = NA))
+  )
+```
+
+
+Big map
+```{r}
+ggplot() +
+  geom_sf(data = geobr::read_country(), fill = NA, color = NA) +
+  annotation_custom(
+    grob = ggplotGrob(p[[1]]),
+    xmin = -75, xmax = -65, ymin = -8, ymax  = 2
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[2]]),
+    xmin = -75, xmax = -65, ymin = -10, ymax  = -20
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[3]]),
+    xmin = -75, xmax = -65, ymin = -32, ymax  = -22
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[4]]),
+    xmin = -65, xmax = -55, ymin = -8, ymax  = 2
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[5]]),
+    xmin = -65, xmax = -55, ymin = -20, ymax  = -10
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[6]]),
+    xmin = -65, xmax = -55, ymin = -32, ymax  = -22
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[7]]),
+    xmin = -55, xmax = -45, ymin = -8, ymax  = 2
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[8]]),
+    xmin = -55, xmax = -45, ymin = -20, ymax  = -10
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[9]]),
+    xmin = -55, xmax = -45, ymin = -32, ymax  = -22
+  ) +
+  annotation_custom(
+    grob = ggplotGrob(p[[10]]),
+    xmin = -45, xmax = -35, ymin = -8, ymax  = 2
+  ) +
+  labs(title = "urban rail in brazil - average to high capacity", caption = "source: mobilidados") +
+  theme_void(base_family = "Atkinson Hyperlegible") %+replace%
+  theme(plot.margin = margin(5,5,5,5), plot.background = element_rect(fill = "white", color = NA),
+        plot.title = element_text(hjust = 0.05))
+
+ggsave(here("output/p-day26_2.png"))
 ```
 

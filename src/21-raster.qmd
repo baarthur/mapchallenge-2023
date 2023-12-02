@@ -104,6 +104,8 @@ days <- c(14:20)
 Variogram
 ```{r}
 #| label: variogram
+#| message: false
+
 vgm <- days %>% 
   map(
     \(x)
@@ -118,7 +120,7 @@ Fit
 ```{r}
 #| label: fit
 
-fit.variogram(vgm_chuva %>% filter(dist >= 2), model=vgm("Sph"))
+# fit.variogram(vgm_chuva %>% filter(dist >= 2), model=vgm("Sph"))
 
 vgm_fit <- days %>% 
   map(
@@ -190,6 +192,15 @@ m_rain <- days %>%
       scale_fill_viridis_c(option = "viridis", na.value = NA) +
       labs(subtitle = paste0("It's raining season in Belo Horizonte again, but not everywhere.",
       "\n", "Data for ", x, " October 2023"))
+  ) %>% 
+  setNames(days)
+
+days[-1] %>% 
+  imap(
+    \(p, id) 
+    m_rain %>% 
+      pluck(as.character(p)) %>% 
+      ggsave(here(paste0("output/p-day21_", id, ".png")), plot = .)
   )
 ```
 

@@ -258,5 +258,7 @@ ggplot(shp_rio) +
     panel.background = element_rect(fill = "#91daee", color = NA),
     #legend.position = "none"
   )
+
+ggsave(here("output/p-day20.png"))
 ```
 
