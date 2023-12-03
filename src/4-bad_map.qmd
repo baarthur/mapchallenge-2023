@@ -26,7 +26,7 @@ Once again, I really love ipeaGIT!
 ```{r}
 #| label: download
 
-shp_mg <- read_state(code_state = "31")
+shp_mg <- read_state(code_state = 31)
 shp_muni <- read_municipality(code_muni = "MG")
 shp_ri <- read_immediate_region(code_immediate = "MG")
 ```
@@ -112,5 +112,7 @@ labs(title = "minas gerais as a person", fill = "parts") +
 theme(
 text = element_text(family = "Comic Sans MS")
 )
+
+ggsave(here::here("output/p-day4.png"))
 ```
 
